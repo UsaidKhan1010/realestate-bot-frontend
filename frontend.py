@@ -1,12 +1,25 @@
-# frontend.py — Final premium dark/chat UI for AI Realtor Assistant
+# frontend.py — robust dark/chat UI for AI Realtor Assistant
+# Safe about Streamlit 'rerun' APIs: uses available rerun function if present.
+
 import streamlit as st
 import requests
 from requests.exceptions import RequestException
 
 # ========== CONFIG ==========
-BACKEND_URL = "https://realestate-bot-backend.onrender.com"  # <- already set to your live backend
+BACKEND_URL = "https://realestate-bot-backend.onrender.com"  # your live backend
 CHAT_ENDPOINT = f"{BACKEND_URL}/chat"
 LEAD_ENDPOINT = f"{BACKEND_URL}/lead"
+
+# ========== small helper: safe rerun ==========
+# Some Streamlit versions have st.experimental_rerun(), some have st.rerun(), some none.
+def safe_rerun():
+    rerun_fn = getattr(st, "experimental_rerun", None) or getattr(st, "rerun", None)
+    if callable(rerun_fn):
+        try:
+            rerun_fn()
+        except Exception:
+            # ignore failures to avoid crashing the app
+            pass
 
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="AI Realtor Assistant", page_icon="🏠", layout="wide", initial_sidebar_state="auto")
@@ -64,7 +77,8 @@ with side_col:
             bot = f"Error contacting backend: {e}"
             st.session_state["last_error"] = str(e)
         st.session_state["messages"].append({"role":"assistant","content":bot})
-        st.experimental_rerun()
+        safe_rerun()
+
     if st.button("Book a tour tomorrow 5pm"):
         q = "Book a tour for tomorrow at 5PM"
         st.session_state["messages"].append({"role":"user","content":q})
@@ -75,7 +89,7 @@ with side_col:
             bot = f"Error contacting backend: {e}"
             st.session_state["last_error"] = str(e)
         st.session_state["messages"].append({"role":"assistant","content":bot})
-        st.experimental_rerun()
+        safe_rerun()
 
     st.markdown("---")
     st.markdown("### ❓ What to ask")
@@ -142,4 +156,4 @@ with chat_col:
                 pass
 
         st.session_state["messages"].append({"role":"assistant","content":bot_reply})
-        st.experimental_rerun()
+        safe_rerun()
