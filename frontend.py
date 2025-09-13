@@ -1,41 +1,37 @@
-# frontend.py — robust dark/chat UI for AI Realtor Assistant
-# Safe about Streamlit 'rerun' APIs: uses available rerun function if present.
-
+# frontend.py — robust dark/chat UI for AI Realtor Assistant (final)
 import streamlit as st
 import requests
 from requests.exceptions import RequestException
+import html
 
 # ========== CONFIG ==========
-BACKEND_URL = "https://realestate-bot-backend.onrender.com"  # your live backend
+BACKEND_URL = "https://realestate-bot-backend.onrender.com"  # <- replace if different
 CHAT_ENDPOINT = f"{BACKEND_URL}/chat"
 LEAD_ENDPOINT = f"{BACKEND_URL}/lead"
 
-# ========== small helper: safe rerun ==========
-# Some Streamlit versions have st.experimental_rerun(), some have st.rerun(), some none.
+# ========== safe rerun helper ==========
 def safe_rerun():
     rerun_fn = getattr(st, "experimental_rerun", None) or getattr(st, "rerun", None)
     if callable(rerun_fn):
         try:
             rerun_fn()
         except Exception:
-            # ignore failures to avoid crashing the app
             pass
 
-# ========== PAGE SETUP ==========
-st.set_page_config(page_title="AI Realtor Assistant", page_icon="🏠", layout="wide", initial_sidebar_state="auto")
+# ========== page setup ==========
+st.set_page_config(page_title="AI Realtor Assistant", page_icon="🏠", layout="wide")
 
-# ========== STYLES ==========
+# ========== styles ==========
 st.markdown(
     """
     <style>
-    .stApp { background-color: #0f172a; color: #e2e8f0; }
-    .header { text-align:center; margin-bottom: 6px; }
-    .title { font-size:34px; color:#7dd3fc; text-shadow:0 0 12px #0891b2; margin:4px 0; }
-    .subtitle { color:#94a3b8; margin-bottom:18px; }
-    .user-bubble { background: linear-gradient(135deg,#1e3a8a,#3b82f6); color:white; padding:12px; border-radius:12px; margin:8px 0; text-align:right; box-shadow:0 0 10px #3b82f6; max-width:85%; margin-left:auto; }
-    .bot-bubble  { background: linear-gradient(135deg,#0b1220,#1f2937); color:#e6eef6; padding:12px; border-radius:12px; margin:8px 0; text-align:left; box-shadow:0 0 12px #0ea5e9; max-width:85%; }
-    .quick-btn { display:inline-block; background:#07143a; border:1px solid #2563eb; color:#c7f9ff; padding:8px 12px; border-radius:8px; margin:4px; cursor:pointer; }
-    .debug { color:#94a3b8; font-size:12px; margin-top:6px; }
+    .stApp { background-color: #071027; color: #e6eef6; }
+    .title { font-size:34px; color:#7dd3fc; text-shadow:0 0 10px #0891b2; }
+    .user-bubble { background: linear-gradient(135deg,#0ea5e9,#2563eb); color:white; padding:12px; border-radius:12px; margin:8px 0; max-width:85%; margin-left:auto; box-shadow:0 6px 18px rgba(38,132,255,0.12); }
+    .bot-bubble { background: linear-gradient(135deg,#0b1220,#1e293b); color:#e6eef6; padding:12px; border-radius:12px; margin:8px 0; max-width:85%; box-shadow:0 6px 18px rgba(14,165,233,0.08); }
+    .quick { display:inline-block; background:#07143a; border:1px solid #2563eb; color:#c7f9ff; padding:8px 12px; border-radius:8px; margin:4px; cursor:pointer; }
+    .meta { color:#94a3b8; font-size:12px; margin-top:6px; }
+    .typing { color:#94a3b8; font-style:italic; margin:6px 0; }
     @keyframes fadeIn { from {opacity: 0; transform: translateY(6px);} to {opacity: 1; transform: translateY(0);} }
     .user-bubble, .bot-bubble { animation: fadeIn 0.35s ease-in-out; }
     </style>
@@ -43,76 +39,65 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ========== HEADER ==========
-st.markdown("<div class='header'><div class='title'>🤖 AI Realtor Assistant</div><div class='subtitle'>24/7 lead capture · tour booking · instant nurture</div></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center'><div class='title'>🤖 AI Realtor Assistant</div><div style='color:#94a3b8'>Instant answers · Tour booking · Lead capture</div></div>", unsafe_allow_html=True)
 
-# ========== SESSION STATE ==========
+# ========== session state ==========
 if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+    st.session_state["messages"] = []  # list of dicts: {"role":"user"/"assistant", "content": "..."}
 if "awaiting_lead" not in st.session_state:
     st.session_state["awaiting_lead"] = False
 if "lead_count" not in st.session_state:
     st.session_state["lead_count"] = 0
 if "last_error" not in st.session_state:
     st.session_state["last_error"] = None
+if "is_typing" not in st.session_state:
+    st.session_state["is_typing"] = False
 
-# ========== LAYOUT ==========
+# ========== layout ==========
 chat_col, side_col = st.columns([4, 1])
 
-# Sidebar content
+# Sidebar (controls)
 with side_col:
     st.markdown("### ⚙ Bot Dashboard")
-    backend_status = "Configured" if "realestate-bot-backend.onrender.com" in BACKEND_URL else "Not configured"
-    st.markdown(f"**Backend:** {backend_status}")
+    st.markdown(f"**Backend:** {BACKEND_URL.split('//')[-1]}")
     st.markdown(f"**Leads captured:** {st.session_state['lead_count']}")
     st.markdown("---")
     st.markdown("### 💡 Quick asks")
     if st.button("Show me 2BHK under $500k"):
-        q = "Show me 2BHK apartments under $500k"
-        st.session_state["messages"].append({"role":"user","content":q})
-        try:
-            r = requests.post(CHAT_ENDPOINT, json={"message": q}, timeout=10)
-            bot = r.json().get("response", "No response")
-        except RequestException as e:
-            bot = f"Error contacting backend: {e}"
-            st.session_state["last_error"] = str(e)
-        st.session_state["messages"].append({"role":"assistant","content":bot})
+        st.session_state["messages"].append({"role":"user","content":"Show me 2BHK apartments under $500k"})
         safe_rerun()
-
     if st.button("Book a tour tomorrow 5pm"):
-        q = "Book a tour for tomorrow at 5PM"
-        st.session_state["messages"].append({"role":"user","content":q})
-        try:
-            r = requests.post(CHAT_ENDPOINT, json={"message": q}, timeout=10)
-            bot = r.json().get("response", "No response")
-        except RequestException as e:
-            bot = f"Error contacting backend: {e}"
-            st.session_state["last_error"] = str(e)
-        st.session_state["messages"].append({"role":"assistant","content":bot})
+        st.session_state["messages"].append({"role":"user","content":"Book a tour for tomorrow at 5PM"})
         safe_rerun()
-
     st.markdown("---")
     st.markdown("### ❓ What to ask")
     st.markdown("- Show me 2BHK apartments under $500k")
     st.markdown("- Book me a tour tomorrow at 5PM")
     st.markdown("- What’s the home buying process?")
 
-# Chat column: show history
+# Chat column: render history
 with chat_col:
     for msg in st.session_state["messages"]:
+        content = html.escape(msg["content"]).replace("\n", "<br>")
         if msg["role"] == "user":
-            st.markdown(f"<div class='user-bubble'>{msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='user-bubble'>{content}</div>", unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='bot-bubble'>{msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='bot-bubble'>{content}</div>", unsafe_allow_html=True)
+
+    if st.session_state["is_typing"]:
+        st.markdown("<div class='typing'>Aiden is typing...</div>", unsafe_allow_html=True)
 
     if st.session_state["last_error"]:
-        st.markdown(f"<div class='debug'>Last error: {st.session_state['last_error']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='meta'>Last error: {st.session_state['last_error']}</div>", unsafe_allow_html=True)
 
+    # Input
     prompt = st.chat_input("Type your message...")
 
     if prompt:
+        # add user message
         st.session_state["messages"].append({"role":"user","content":prompt})
 
+        # If awaiting lead (bot previously asked for contact)
         if st.session_state["awaiting_lead"]:
             parts = [p.strip() for p in prompt.split(",")]
             try:
@@ -136,24 +121,67 @@ with chat_col:
                     bot_reply = "Please provide: Name, Email, Phone, Budget(optional). Example: John Doe, john@mail.com, +123456789, 500000"
             except Exception as e:
                 bot_reply = f"Invalid input format: {e}"
+
+            # append assistant reply and rerun
+            st.session_state["messages"].append({"role":"assistant","content":bot_reply})
+            safe_rerun()
         else:
+            # send chat request with robust handling and guaranteed cleanup of typing flag
+            history_payload = st.session_state["messages"][-12:]  # send last 12 turns (user+assistant)
+            payload = {"message": prompt, "history": history_payload}
+
+            st.session_state["is_typing"] = True
+            safe_rerun()
+
+            bot_reply = "⚠️ No response (network)."  # fallback
             try:
-                resp = requests.post(CHAT_ENDPOINT, json={"message": prompt}, timeout=12)
+                resp = requests.post(CHAT_ENDPOINT, json=payload, timeout=12)
                 if resp.status_code == 200:
-                    bot_reply = resp.json().get("response", "No response from backend.")
+                    data = resp.json()
+                    bot_reply = data.get("response", "No response from backend.")
+
+                    # if backend returns lead_capture, auto-save it
+                    if isinstance(data, dict) and "lead_capture" in data:
+                        lc = data["lead_capture"]
+                        try:
+                            lead_resp = requests.post(LEAD_ENDPOINT, json=lc, timeout=8)
+                            if lead_resp.status_code == 200:
+                                bot_reply += "\n\n✅ I saved your contact — an agent will reach out soon."
+                                st.session_state["lead_count"] += 1
+                                st.session_state["awaiting_lead"] = False
+                            else:
+                                bot_reply += f"\n\n⚠️ Could not save contact (status {lead_resp.status_code})."
+                        except Exception as e:
+                            bot_reply += f"\n\n⚠️ Failed saving contact: {e}"
+                    else:
+                        # check if assistant asked for contact info in the reply
+                        if any(phrase in bot_reply.lower() for phrase in ["save your contact", "can i get your", "please provide: name", "please provide"]):
+                            bot_reply += "\n\n💡 Please provide: Name, Email, Phone, Budget(optional)"
+                            st.session_state["awaiting_lead"] = True
+
+                    st.session_state["last_error"] = None
                 else:
                     bot_reply = f"Backend error (status {resp.status_code}): {resp.text}"
                     st.session_state["last_error"] = bot_reply
-            except RequestException as e:
-                bot_reply = f"Error contacting backend: {e}"
+
+            except requests.exceptions.ReadTimeout:
+                bot_reply = "⚠️ Request timed out. Try again — the backend may be busy."
+                st.session_state["last_error"] = "Request timed out"
+            except requests.exceptions.ConnectionError as e:
+                bot_reply = f"⚠️ Connection error: {e}"
                 st.session_state["last_error"] = str(e)
+            except Exception as e:
+                bot_reply = f"⚠️ Unexpected error: {e}"
+                st.session_state["last_error"] = str(e)
+            finally:
+                # ALWAYS clear typing flag to avoid stuck UI
+                st.session_state["is_typing"] = False
 
-            try:
-                if isinstance(bot_reply, str) and ("save your contact" in bot_reply.lower() or "can i get your" in bot_reply.lower() or "share your contact" in bot_reply.lower()):
-                    bot_reply += "\n\n💡 Please provide: Name, Email, Phone, Budget(optional)"
-                    st.session_state["awaiting_lead"] = True
-            except Exception:
-                pass
+            # append assistant reply and rerun
+            st.session_state["messages"].append({"role":"assistant","content":bot_reply})
+            safe_rerun()
 
-        st.session_state["messages"].append({"role":"assistant","content":bot_reply})
-        safe_rerun()
+# ========== footer helper hint ==========
+st.markdown("---")
+st.markdown("<div style='color:#94a3b8;font-size:12px'>Tip: To save contact quickly type: Name, email@example.com, +1234567890, 450000</div>", unsafe_allow_html=True)
+
