@@ -1,11 +1,12 @@
-# frontend.py — robust dark/chat UI for AI Realtor Assistant (final)
+@'
+# frontend.py — final, robust dark/chat UI for AI Realtor Assistant
 import streamlit as st
 import requests
 from requests.exceptions import RequestException
 import html
 
 # ========== CONFIG ==========
-BACKEND_URL = "https://realestate-bot-backend.onrender.com"  # <- replace if different
+BACKEND_URL = "https://realestate-bot-backend.onrender.com"
 CHAT_ENDPOINT = f"{BACKEND_URL}/chat"
 LEAD_ENDPOINT = f"{BACKEND_URL}/lead"
 
@@ -43,7 +44,7 @@ st.markdown("<div style='text-align:center'><div class='title'>🤖 AI Realtor A
 
 # ========== session state ==========
 if "messages" not in st.session_state:
-    st.session_state["messages"] = []  # list of dicts: {"role":"user"/"assistant", "content": "..."}
+    st.session_state["messages"] = []
 if "awaiting_lead" not in st.session_state:
     st.session_state["awaiting_lead"] = False
 if "lead_count" not in st.session_state:
@@ -54,9 +55,8 @@ if "is_typing" not in st.session_state:
     st.session_state["is_typing"] = False
 
 # ========== layout ==========
-chat_col, side_col = st.columns([4, 1])
+chat_col, side_col = st.columns([4,1])
 
-# Sidebar (controls)
 with side_col:
     st.markdown("### ⚙ Bot Dashboard")
     st.markdown(f"**Backend:** {BACKEND_URL.split('//')[-1]}")
@@ -75,10 +75,9 @@ with side_col:
     st.markdown("- Book me a tour tomorrow at 5PM")
     st.markdown("- What’s the home buying process?")
 
-# Chat column: render history
 with chat_col:
     for msg in st.session_state["messages"]:
-        content = html.escape(msg["content"]).replace("\n", "<br>")
+        content = html.escape(msg["content"]).replace("\n","<br>")
         if msg["role"] == "user":
             st.markdown(f"<div class='user-bubble'>{content}</div>", unsafe_allow_html=True)
         else:
@@ -90,14 +89,11 @@ with chat_col:
     if st.session_state["last_error"]:
         st.markdown(f"<div class='meta'>Last error: {st.session_state['last_error']}</div>", unsafe_allow_html=True)
 
-    # Input
     prompt = st.chat_input("Type your message...")
 
     if prompt:
-        # add user message
         st.session_state["messages"].append({"role":"user","content":prompt})
 
-        # If awaiting lead (bot previously asked for contact)
         if st.session_state["awaiting_lead"]:
             parts = [p.strip() for p in prompt.split(",")]
             try:
@@ -122,25 +118,22 @@ with chat_col:
             except Exception as e:
                 bot_reply = f"Invalid input format: {e}"
 
-            # append assistant reply and rerun
             st.session_state["messages"].append({"role":"assistant","content":bot_reply})
             safe_rerun()
         else:
-            # send chat request with robust handling and guaranteed cleanup of typing flag
-            history_payload = st.session_state["messages"][-12:]  # send last 12 turns (user+assistant)
+            history_payload = st.session_state["messages"][-12:]
             payload = {"message": prompt, "history": history_payload}
 
             st.session_state["is_typing"] = True
             safe_rerun()
 
-            bot_reply = "⚠️ No response (network)."  # fallback
+            bot_reply = "⚠️ No response (network)."
             try:
                 resp = requests.post(CHAT_ENDPOINT, json=payload, timeout=12)
                 if resp.status_code == 200:
                     data = resp.json()
                     bot_reply = data.get("response", "No response from backend.")
 
-                    # if backend returns lead_capture, auto-save it
                     if isinstance(data, dict) and "lead_capture" in data:
                         lc = data["lead_capture"]
                         try:
@@ -154,7 +147,6 @@ with chat_col:
                         except Exception as e:
                             bot_reply += f"\n\n⚠️ Failed saving contact: {e}"
                     else:
-                        # check if assistant asked for contact info in the reply
                         if any(phrase in bot_reply.lower() for phrase in ["save your contact", "can i get your", "please provide: name", "please provide"]):
                             bot_reply += "\n\n💡 Please provide: Name, Email, Phone, Budget(optional)"
                             st.session_state["awaiting_lead"] = True
@@ -174,14 +166,13 @@ with chat_col:
                 bot_reply = f"⚠️ Unexpected error: {e}"
                 st.session_state["last_error"] = str(e)
             finally:
-                # ALWAYS clear typing flag to avoid stuck UI
                 st.session_state["is_typing"] = False
 
-            # append assistant reply and rerun
             st.session_state["messages"].append({"role":"assistant","content":bot_reply})
             safe_rerun()
 
-# ========== footer helper hint ==========
 st.markdown("---")
 st.markdown("<div style='color:#94a3b8;font-size:12px'>Tip: To save contact quickly type: Name, email@example.com, +1234567890, 450000</div>", unsafe_allow_html=True)
+'@ | Set-Content .\frontend.py -Encoding utf8
+
 
