@@ -1,5 +1,6 @@
-@'
-# frontend.py — final, robust dark/chat UI for AI Realtor Assistant
+# frontend.py — clean, robust dark/chat UI for AI Realtor Assistant
+# Overwrite your existing frontend.py with this exact file.
+
 import streamlit as st
 import requests
 from requests.exceptions import RequestException
@@ -42,9 +43,9 @@ st.markdown(
 
 st.markdown("<div style='text-align:center'><div class='title'>🤖 AI Realtor Assistant</div><div style='color:#94a3b8'>Instant answers · Tour booking · Lead capture</div></div>", unsafe_allow_html=True)
 
-# ========== session state ==========
+# ========== session state defaults ==========
 if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+    st.session_state["messages"] = []  # {"role":"user"/"assistant","content": "..."}
 if "awaiting_lead" not in st.session_state:
     st.session_state["awaiting_lead"] = False
 if "lead_count" not in st.session_state:
@@ -53,9 +54,70 @@ if "last_error" not in st.session_state:
     st.session_state["last_error"] = None
 if "is_typing" not in st.session_state:
     st.session_state["is_typing"] = False
+if "pending_request" not in st.session_state:
+    st.session_state["pending_request"] = None
+if "processing_request" not in st.session_state:
+    st.session_state["processing_request"] = False
 
-# ========== layout ==========
-chat_col, side_col = st.columns([4,1])
+# ========== If there's a pending request, process it exactly once ==========
+# This block executes at top-level run when pending_request was set previously.
+if st.session_state.get("pending_request") and not st.session_state.get("processing_request"):
+    st.session_state["processing_request"] = True
+    user_message = st.session_state["pending_request"].get("message")
+    # prepare payload: last 12 messages for context
+    history_payload = st.session_state["messages"][-12:]
+    payload = {"message": user_message, "history": history_payload}
+
+    bot_reply = "⚠️ No response (network)."
+    lead_capture = None
+
+    try:
+        resp = requests.post(CHAT_ENDPOINT, json=payload, timeout=12)
+        if resp.status_code == 200:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"response": resp.text}
+            if isinstance(data, dict):
+                bot_reply = data.get("response", str(data))
+                lead_capture = data.get("lead_capture")
+            else:
+                bot_reply = str(data)
+        else:
+            bot_reply = f"Backend error (status {resp.status_code}): {resp.text}"
+            st.session_state["last_error"] = bot_reply
+    except requests.exceptions.ReadTimeout:
+        bot_reply = "⚠️ Request timed out. Try again — the backend may be busy."
+        st.session_state["last_error"] = "Request timed out"
+    except requests.exceptions.ConnectionError as e:
+        bot_reply = f"⚠️ Connection error: {e}"
+        st.session_state["last_error"] = str(e)
+    except Exception as e:
+        bot_reply = f"⚠️ Unexpected error: {e}"
+        st.session_state["last_error"] = str(e)
+
+    # If backend returned a lead_capture dict, attempt to save it
+    if isinstance(lead_capture, dict):
+        try:
+            lead_resp = requests.post(LEAD_ENDPOINT, json=lead_capture, timeout=8)
+            if lead_resp.status_code == 200:
+                bot_reply += "\n\n✅ I saved your contact — an agent will reach out soon."
+                st.session_state["lead_count"] += 1
+                st.session_state["awaiting_lead"] = False
+            else:
+                bot_reply += f"\n\n⚠️ Could not save contact (status {lead_resp.status_code})."
+        except Exception as e:
+            bot_reply += f"\n\n⚠️ Failed saving contact: {e}"
+
+    # append assistant reply, clear pending flags and rerun once
+    st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
+    st.session_state["pending_request"] = None
+    st.session_state["processing_request"] = False
+    st.session_state["is_typing"] = False
+    safe_rerun()
+
+# ========== Layout ==========
+chat_col, side_col = st.columns([4, 1])
 
 with side_col:
     st.markdown("### ⚙ Bot Dashboard")
@@ -64,11 +126,19 @@ with side_col:
     st.markdown("---")
     st.markdown("### 💡 Quick asks")
     if st.button("Show me 2BHK under $500k"):
-        st.session_state["messages"].append({"role":"user","content":"Show me 2BHK apartments under $500k"})
+        q = "Show me 2BHK apartments under $500k"
+        st.session_state["messages"].append({"role": "user", "content": q})
+        st.session_state["pending_request"] = {"message": q}
+        st.session_state["is_typing"] = True
         safe_rerun()
+
     if st.button("Book a tour tomorrow 5pm"):
-        st.session_state["messages"].append({"role":"user","content":"Book a tour for tomorrow at 5PM"})
+        q = "Book a tour for tomorrow at 5PM"
+        st.session_state["messages"].append({"role": "user", "content": q})
+        st.session_state["pending_request"] = {"message": q}
+        st.session_state["is_typing"] = True
         safe_rerun()
+
     st.markdown("---")
     st.markdown("### ❓ What to ask")
     st.markdown("- Show me 2BHK apartments under $500k")
@@ -76,24 +146,28 @@ with side_col:
     st.markdown("- What’s the home buying process?")
 
 with chat_col:
+    # show history
     for msg in st.session_state["messages"]:
-        content = html.escape(msg["content"]).replace("\n","<br>")
+        content = html.escape(msg["content"]).replace("\n", "<br>")
         if msg["role"] == "user":
             st.markdown(f"<div class='user-bubble'>{content}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='bot-bubble'>{content}</div>", unsafe_allow_html=True)
 
+    # typing indicator & debug
     if st.session_state["is_typing"]:
         st.markdown("<div class='typing'>Aiden is typing...</div>", unsafe_allow_html=True)
 
     if st.session_state["last_error"]:
         st.markdown(f"<div class='meta'>Last error: {st.session_state['last_error']}</div>", unsafe_allow_html=True)
 
+    # input
     prompt = st.chat_input("Type your message...")
 
     if prompt:
-        st.session_state["messages"].append({"role":"user","content":prompt})
+        st.session_state["messages"].append({"role": "user", "content": prompt})
 
+        # If the bot previously asked for contact info
         if st.session_state["awaiting_lead"]:
             parts = [p.strip() for p in prompt.split(",")]
             try:
@@ -118,61 +192,19 @@ with chat_col:
             except Exception as e:
                 bot_reply = f"Invalid input format: {e}"
 
-            st.session_state["messages"].append({"role":"assistant","content":bot_reply})
+            st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
             safe_rerun()
-        else:
-            history_payload = st.session_state["messages"][-12:]
-            payload = {"message": prompt, "history": history_payload}
 
+        else:
+            # not awaiting lead — trigger standard chat flow via pending_request
+            st.session_state["pending_request"] = {"message": prompt}
             st.session_state["is_typing"] = True
             safe_rerun()
 
-            bot_reply = "⚠️ No response (network)."
-            try:
-                resp = requests.post(CHAT_ENDPOINT, json=payload, timeout=12)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    bot_reply = data.get("response", "No response from backend.")
-
-                    if isinstance(data, dict) and "lead_capture" in data:
-                        lc = data["lead_capture"]
-                        try:
-                            lead_resp = requests.post(LEAD_ENDPOINT, json=lc, timeout=8)
-                            if lead_resp.status_code == 200:
-                                bot_reply += "\n\n✅ I saved your contact — an agent will reach out soon."
-                                st.session_state["lead_count"] += 1
-                                st.session_state["awaiting_lead"] = False
-                            else:
-                                bot_reply += f"\n\n⚠️ Could not save contact (status {lead_resp.status_code})."
-                        except Exception as e:
-                            bot_reply += f"\n\n⚠️ Failed saving contact: {e}"
-                    else:
-                        if any(phrase in bot_reply.lower() for phrase in ["save your contact", "can i get your", "please provide: name", "please provide"]):
-                            bot_reply += "\n\n💡 Please provide: Name, Email, Phone, Budget(optional)"
-                            st.session_state["awaiting_lead"] = True
-
-                    st.session_state["last_error"] = None
-                else:
-                    bot_reply = f"Backend error (status {resp.status_code}): {resp.text}"
-                    st.session_state["last_error"] = bot_reply
-
-            except requests.exceptions.ReadTimeout:
-                bot_reply = "⚠️ Request timed out. Try again — the backend may be busy."
-                st.session_state["last_error"] = "Request timed out"
-            except requests.exceptions.ConnectionError as e:
-                bot_reply = f"⚠️ Connection error: {e}"
-                st.session_state["last_error"] = str(e)
-            except Exception as e:
-                bot_reply = f"⚠️ Unexpected error: {e}"
-                st.session_state["last_error"] = str(e)
-            finally:
-                st.session_state["is_typing"] = False
-
-            st.session_state["messages"].append({"role":"assistant","content":bot_reply})
-            safe_rerun()
-
+# footer tip
 st.markdown("---")
 st.markdown("<div style='color:#94a3b8;font-size:12px'>Tip: To save contact quickly type: Name, email@example.com, +1234567890, 450000</div>", unsafe_allow_html=True)
-'@ | Set-Content .\frontend.py -Encoding utf8
+
+
 
 
